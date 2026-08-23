@@ -1,0 +1,25 @@
+{
+  "name": "my-dev",
+  "runArgs": [
+    "--dns=8.8.8.8",
+    "--dns=1.1.1.1",
+    "--add-host=host.docker.internal:host-gateway"
+  ],
+  "containerEnv": {
+    "http_proxy": "http://docker.internal",
+    "https_proxy": "http://docker.internal",
+    "no_proxy": "localhost,127.0.0.1,.internal"
+  },
+  "remoteEnv": {
+    "http_proxy": "http://docker.internal",
+    "https_proxy": "http://docker.internal",
+    "no_proxy": "localhost,127.0.0.1,.internal"
+  },
+  "settings": {
+    "http.proxy": "http://docker.internal",
+    "http.proxyStrictSSL": false,
+    "github.copilot.advanced": {
+      "debug.overrideProxyUrl": "http://docker.internal"
+    }
+  }
+}

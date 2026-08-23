@@ -1,0 +1,5 @@
+[2026-08-12 14:31:26,418][__main__][INFO] - Hydra dir: /workspace/aerojepa/outputs/2026-08-12/14-31-26 | run dir: /workspace/aerojepa/outputs/aerojepa  (world_size=1)
+[2026-08-12 14:31:26,420][__main__][INFO] - Building split manifest at SuperWing_Dataset/split_by_geometry.json
+[2026-08-12 14:31:26,471][__main__][INFO] - Building normalization stats at SuperWing_Dataset/normalization_stats_train.json
+[2026-08-12 14:32:17,094][__main__][INFO] - Train / val samples: 23054 / 2931
+[2026-08-12 14:32:17,521][__main__][INFO] - Model parameters: 9.14 M

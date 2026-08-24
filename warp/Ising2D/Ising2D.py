@@ -138,7 +138,8 @@ import time
 
 # --- Simulation Parameters ---
 LATTICE_SIZE = 256
-TEMPERATURE = 2.269  # Try: T=0.02 (ordered), T=2.269 (critical), T=20.0 (disordered)
+# T=0.02 (ordered), T=2.269 (critical), T=20.0 (disordered)
+TEMPERATURE = 20.0
 
 print(f"开始模拟 {LATTICE_SIZE}×{LATTICE_SIZE} Ising model at T={TEMPERATURE}")
 print(
@@ -155,10 +156,7 @@ norm = Normalize(vmin=-1, vmax=1)
 
 # Collect animation frames
 frames = []
-print("Running simulation and capturing frames...")
-
 start_time = time.perf_counter()
-
 magnetization_values = []
 for step in range(200):  # 200 Monte Carlo steps
     # Evolve the system by one complete lattice sweep
@@ -177,23 +175,23 @@ for step in range(200):  # 200 Monte Carlo steps
     frames.append(rgb_frame)
 
     # Progress indicator
-    if (step + 1) % 50 == 0:
-        print(f"  Step {step + 1}/200 completed")
+    if (step + 1) % 10 == 0:
+        print(f"  Step {step + 1}/200, 当前磁化强度 M = {mag:.4f}")
 
 end_time = time.perf_counter()
 print(f"Simulation completed in {end_time - start_time:.2f} seconds")
 
-# Create animated GIF to visualize time evolution
+# 创建输出目录并保存动画 GIF
 print("Creating animated GIF...")
 pil_images = [Image.fromarray(frame) for frame in frames]
 output_filename = (
-    f"./images/ising-model/python_{LATTICE_SIZE}x{LATTICE_SIZE}_{TEMPERATURE}.gif"
+    f"./images/Ising2D_{LATTICE_SIZE}x{LATTICE_SIZE}_{TEMPERATURE}.gif"
 )
-
 # Ensure output directory exists
 os.makedirs(os.path.dirname(output_filename), exist_ok=True)
 
 # Save as animated GIF (100ms per frame = 10 FPS)
+# 第1幅图像作为主图，后续帧作为附加帧，循环播放
 pil_images[0].save(
     output_filename,
     save_all=True,
@@ -201,5 +199,15 @@ pil_images[0].save(
     duration=100,  # milliseconds per frame
     loop=0,  # infinite loop
 )
+
+fig, ax  =  plt.subplots(figsize=(10, 6))
+ax.plot(magnetization_values, color="blue", linewidth=2)
+ax.set_title(f"Magnetization vs. Monte Carlo Steps (T={TEMPERATURE})", fontsize=14)
+ax.set_xlabel("Monte Carlo Steps", fontsize=12)
+ax.set_ylabel("Magnetization M", fontsize=12)
+plt.grid()
+plt.tight_layout()
+plt.savefig(f"./images/Ising2D_{LATTICE_SIZE}x{LATTICE_SIZE}_{TEMPERATURE}_magnetization.png")
+plt.close(fig)
 
 IPython.display.Image(output_filename)

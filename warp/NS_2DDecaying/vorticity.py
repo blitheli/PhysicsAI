@@ -1,5 +1,9 @@
 import numpy as np
 import warp as wp
+from utils import validate_diffusion,validate_advection,validate_fft_roundtrip,initialize_decaying_turbulence
+from PIL import Image
+from matplotlib.colors import Normalize
+import os
 
 #########################################################
 #            2-D 涡量
@@ -181,24 +185,117 @@ def transpose(x: wp.array2d[wp.vec2f], y: wp.array2d[wp.vec2f]):
     y[j, i] = x[i, j]
     
 
+@wp.kernel
+def extract_real_and_scale(scale: float, complex_array: wp.array2d[wp.vec2f], real_array: wp.array2d[float]):
+    """提取复数数组的实部并进行缩放(除以缩放因子)。
+
+    Args:
+        scale (float): 缩放因子
+        complex_array (wp.array2d[wp.vec2f]): 输入复数数组(2D)
+        real_array (wp.array2d[float]): 输出实数数组(2D)
+    """
+    i, j = wp.tid()
+
+    real_array[i, j] = complex_array[i, j].x / scale
+
+@wp.kernel
+def multiply_k2_inverse(inv_k_sq: wp.array2d[float], omega_hat: wp.array2d[wp.vec2f], psi_hat: wp.array2d[wp.vec2f]):
+    """求解泊松方程，在傅里叶空间中将 omega_hat 乘以 1/k^2 得到 psi_hat。
+
+    Args:
+        inv_k_sq (wp.array2d[float]): 预计算的 1/k^2 数组(2D)
+        omega_hat (wp.array2d[wp.vec2f]): 输入的涡量傅里叶系数(2D)
+        psi_hat (wp.array2d[wp.vec2f]): 输出的流函数傅里叶系数(2D)
+    """
+    i, j = wp.tid()
+
+    psi_hat[i, j] = omega_hat[i, j] * inv_k_sq[i, j]
+
+omega_complex = wp.zeros((N_GRID, N_GRID), dtype=wp.vec2f)
+fft_temp_1 = wp.zeros((N_GRID, N_GRID), dtype=wp.vec2f)
+fft_temp_2 = wp.zeros((N_GRID, N_GRID), dtype=wp.vec2f)
+fft_temp_3 = wp.zeros((N_GRID, N_GRID), dtype=wp.vec2f)
+
+
+# 返回离散傅里叶空间中的波数网格(频率坐标)k=[0,1,2,...,N/2-1, -N/2, ..., -2, -1]*1/L
+k = np.fft.fftfreq(N_GRID, d = 1.0/N_GRID)
+kx,ky = np.meshgrid(k, k)
+k2 = kx**2 + ky**2
+inv_k_sq_np = np.zeros_like(k2)
+nozero = k2 != 0
+inv_k_sq_np[nozero] = 1.0 / k2[nozero]
+inv_k_sq_np = inv_k_sq_np.astype(np.float32)
+
+# 转换为 Warp 数组
+inv_k_sq = wp.array(inv_k_sq_np, dtype=float)
+
 def advance_vorticity_by_dt(omega_0, omega_1, psi):
-    """Placeholder for the vorticity advancement update."""
+    """涡度场和流函数前进一个时间步"""
     # === Building Block 1: Solve equation 1 to update vorticity ===
     # 对于每个网格点，计算涡量的更新值，使用有限差分方法近似偏导数
+
+    wp.launch(viscous_advection_kernel, dim=(N_GRID, N_GRID), inputs=[omega_0, psi, omega_1])
 
     # === Building Block 2: Solve equation 2 using FFT ===
     # 2-D 傅里叶变换以获得 Fourier 空间中的涡量
     # 求解泊松方程在 Fourier 空间中
     # 2-D 逆傅里叶变换以获得物理空间中的流场函数psi
-    return omega_1
+    # 涡度场转换为复数
+    wp.launch(copy_float_to_complex, dim=(N_GRID, N_GRID), inputs=[omega_1, omega_complex])
+    # 对复数数组进行行方向的 FFT, row FFT -> transpose -> row FFT
+    wp.launch_tiled(fft_tiled, dim=(N_GRID, 1), inputs=[omega_complex, fft_temp_1], block_dim=N_GRID // 2)
+    wp.launch(transpose, dim=(N_GRID, N_GRID), inputs=[fft_temp_1, fft_temp_2])
+    wp.launch_tiled(fft_tiled, dim=(N_GRID, 1), inputs=[fft_temp_2, fft_temp_3], block_dim=N_GRID // 2)
+    # 傅里叶空间中乘以 1/k^2
+    wp.launch(multiply_k2_inverse, dim=(N_GRID, N_GRID), inputs=[inv_k_sq, fft_temp_3, fft_temp_1])
+
+    # 逆傅里叶变换以获得物理空间中的流函数psi
+    wp.launch_tiled(ifft_tiled, dim=(N_GRID, 1), inputs=[fft_temp_1, fft_temp_2], block_dim=N_GRID // 2)
+    wp.launch(transpose, dim=(N_GRID, N_GRID), inputs=[fft_temp_2, fft_temp_3])
+    wp.launch_tiled(ifft_tiled, dim=(N_GRID, 1), inputs=[fft_temp_3, fft_temp_1], block_dim=N_GRID // 2)
+
+    # 提取实部
+    wp.launch(extract_real_and_scale, dim=(N_GRID, N_GRID), inputs=[float(N_GRID*N_GRID), fft_temp_1, psi])
+
+    # 复制 omega_1 到 omega_0
+    wp.copy(omega_0, omega_1)
 
 
-a = wp.array([[1.0, 2.0, 3.0], [4, 5, 6], [7, 8, 9]], dtype=wp.float32)
-b = wp.zeros(a.shape, dtype=wp.vec2f)
-c = wp.zeros(a.shape, dtype=wp.vec2f)
-wp.launch(copy_float_to_complex, dim=a.shape, inputs=[a, b])
 
-wp.launch(transpose, dim=a.shape, inputs=[b, c])
+print("------------验证扩散项------------------------")
+validate_diffusion(diffusion_kernel, n_grid=512, kx = 2, ky =3)
+validate_advection(advection_kernel, n_grid=512, kx = 2, ky =3)
+print("---------------------------------------------")
+print("------------验证 FFT roundtrip ------------------------")
+fig, axes, max_error = validate_fft_roundtrip(
+    fft_kernel=fft_tiled,
+    ifft_kernel=ifft_tiled,
+    n_grid=N_GRID,
+    tile_m=1,
+    tile_n=N_GRID,
+    block_dim=N_GRID // 2,
+)
+print(f"FFT roundtrip max error: {max_error:.3e}")
+print("---------------------------------------------")
+print("  plot 1/k2  ")
+# Visualize the precomputed field using a headless backend so this script can run
+# in a server or container without a GUI display.
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
-cc = c.numpy()
-print(cc)
+fig, ax = plt.subplots(figsize=(4, 4))
+im = ax.imshow(np.log10(inv_k_sq_np + 1e-12), cmap="viridis", origin="lower")
+fig.colorbar(im, ax=ax, label=r"$\log_{10}(1/|k|^2)$")
+ax.set_title(r"Precomputed $1/|k|^2$ (log scale)")
+fig.tight_layout()
+fig.savefig("inv_k_sq_log.png", dpi=150)
+plt.close(fig)
+print("Saved visualization to inv_k_sq_log.png")
+print("---------------------------------------------")
+
+omega_init_np = initialize_decaying_turbulence(n_grid=N_GRID, seed = 42)
+omega_0 = wp.array(omega_init_np, dtype=wp.float)
+omega_1 = wp.zeros_like(omega_0)
+omega_hat = np.fft.fft2(omega_init_np)
+

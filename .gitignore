@@ -12,6 +12,9 @@ ldc_pinns/outputs/
 darcy_nested_fnos/
 vortex_shedding_mgn/
 
+# warp
+warp/NS_2DDecaying/images/
+
 # Python cache and compiled files
 __pycache__/
 **/__pycache__/

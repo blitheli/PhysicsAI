@@ -1,7 +1,16 @@
 # Project-specific directories
 physicsnemo/
-SuperWing_Dataset/
+
 warp/warp_cache/
+
+# 大数据
+data/
+SuperWing_Dataset/
+
+# 临时项目,数据量较大,暂时忽略
+ldc_pinns/outputs/
+darcy_nested_fnos/
+vortex_shedding_mgn/
 
 # Python cache and compiled files
 __pycache__/

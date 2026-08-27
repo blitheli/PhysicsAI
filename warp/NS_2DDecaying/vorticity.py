@@ -259,7 +259,7 @@ def advance_vorticity_by_dt(omega_0, omega_1, psi):
 
     # 复制 omega_1 到 omega_0
     wp.copy(omega_0, omega_1)
-
+    
 
 
 print("------------验证扩散项------------------------")
@@ -294,8 +294,69 @@ plt.close(fig)
 print("Saved visualization to inv_k_sq_log.png")
 print("---------------------------------------------")
 
+# “按照湍流的能谱分布，随机生成一个合理的初始 2D 涡量场”，作为后面时间推进的起始状态。
 omega_init_np = initialize_decaying_turbulence(n_grid=N_GRID, seed = 42)
-omega_0 = wp.array(omega_init_np, dtype=wp.float)
+omega_0 = wp.array(omega_init_np, dtype=float)
 omega_1 = wp.zeros_like(omega_0)
+# 二维离散傅里叶变换(2D FFT)
 omega_hat = np.fft.fft2(omega_init_np)
+psi_init_np = np.fft.ifft2(omega_hat * inv_k_sq_np).real.astype(np.float32)
+psi = wp.array(psi_init_np, dtype=float)
+
+# 使用CUDA Graph 来捕获一次 advance_vorticity_by_dt 的执行，以便后续重复调用时可以更高效地执行。
+with wp.ScopedCapture() as capture:
+    advance_vorticity_by_dt(omega_0, omega_1, psi)
+setp_graph = capture.graph
+
+NUM_FRAMES= 400
+STEPS_PER_FRAME = 20
+GIF_SIZE = 512
+
+cmap = plt.cm.twilight
+norm = Normalize(vmin=-15, vmax=15)
+
+frame_baseline = []
+print(f"\n开始运行 {NUM_FRAMES} 帧的模拟, 每帧包含 {STEPS_PER_FRAME} 步")
+
+for frame in range(NUM_FRAMES):
+    for _ in range(STEPS_PER_FRAME):
+
+        wp.capture_launch(setp_graph)  # 使用捕获的 CUDA Graph 来执行 advance_vorticity_by_dt
+
+    # 将当前帧的涡量场保存到 frame_baseline 列表中
+    vorticity = omega_1.numpy().T  # 转置以匹配物理空间的布局
+    colored = cmap(norm(vorticity))
+    rgb = (colored[:, :, :3] * 255).astype(np.uint8)
+    pil_frame = Image.fromarray(rgb).resize((GIF_SIZE, GIF_SIZE), Image.LANCZOS)
+    frame_baseline.append(pil_frame)
+
+    if (frame + 1) % 5 == 0:
+        print(f"Completed frame {frame + 1}/{NUM_FRAMES}")
+
+total_steps = NUM_FRAMES * STEPS_PER_FRAME
+
+
+# Create animated GIF to visualize time evolution
+print("-----------------------------------")
+print("开始创建动画 GIF...")
+os.makedirs("./images", exist_ok=True)
+output_filename = (
+    f"./images/turbulence_{GIF_SIZE}x{GIF_SIZE}.gif"
+)
+
+# Ensure output directory exists
+os.makedirs(os.path.dirname(output_filename), exist_ok=True)
+
+# Save as animated GIF (100ms per frame = 10 FPS)
+frame_baseline[0].save(
+    output_filename,
+    save_all=True,
+    append_images=frame_baseline[1:],
+    duration=100,  # milliseconds per frame
+    loop=0,  # infinite loop
+)
+print("-----------------------------------------")
+
+
+
 
